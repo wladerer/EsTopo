@@ -1,0 +1,256 @@
+#!/bin/bash
+#PBS -q debug
+#PBS -l select=1:ncpus=128
+#PBS -l walltime=01:00:00
+#PBS -M wtladerer@gmail.com
+#PBS -m be
+
+
+#PBS -A AFOSR35083MAV
+
+
+export VASP_NPROCS=128
+module load VASP
+
+cd $PBS_O_WORKDIR
+
+
+# This is a script that runs multiple vasp jobs to optimize a structure and then perform analyses
+
+# There are a few stages
+# 1. Optimize the structure on low setting (INCAR_LOW) 
+#	- EDIFF = 1.0E-4
+#	- EDIFFG = -0.05
+#	- Prec = Accurate
+# 2. Optimize the structure on medium setting (INCAR_MED)
+#	- EDIFF = 5.0E-4 
+#	- EDIFFG = -0.05
+#	- Prec = Accurate
+# 3. Optimize the structure on high setting (INCAR_HIGH)
+#	- EDIFF = 1.0E-5
+#	- EDIFFG = -0.01
+#	- Prec = Accurate
+
+
+# The script will also perform a few analyses
+# 1. Band structure
+# 2. DOS
+# 3. Band structure with spin orbit coupling
+# 4. DOS with spin orbit coupling
+
+# These analyses will be performed using the following INCAR settings
+# EDIFF = 1.0E-6
+# EDIFFG = -0.01
+# Prec = Accurate
+
+#Each step will be performed in a separate directory
+# 1. Low_opt
+# 2. Med_opt
+# 3. High_opt
+# 4. Band
+# 5. DOS
+# 6. Band_soc
+# 7. DOS_soc
+
+# The POTCAR and KPOINTS files do not need to be changed
+# POTCAR and KPOINTS files are given as the first and second arguments to the script
+# The POSCAR file is given as the third argument to the script
+# The submit script is given as the fourth argument to the script
+potcar=$PWD/POTCAR
+kpoints=$PWD/KPOINTS
+poscar=$PWD/POSCAR
+kpath=$PWD/KPATH
+#Check if the POTCAR and KPOINTS files exist
+if [ ! -f $potcar ]; then
+	echo "POTCAR file does not exist"
+	exit 1
+fi
+
+if [ ! -f $kpoints ]; then
+	echo "KPOINTS file does not exist"
+	exit 1
+fi
+
+#create a log file
+log_file=$PWD/"benchmark.log"
+
+#create an array of the directories
+declare -a dirs=("Low_opt" "Med_opt" "High_opt" "Band" "DOS" "Band_soc" "DOS_soc")
+
+#make the geometry optimization directories
+
+for dir in "${dirs[@]}"
+do
+	mkdir $dir
+done
+
+#copy the POTCAR and KPOINTS files to the directories
+for dir in "${dirs[@]}"
+do
+	cp $potcar $dir
+	cp $kpoints $dir
+done
+
+#copy poscar to Low_opt
+cp $poscar Low_opt/POSCAR
+
+#create the INCAR files for each directory
+#Low_opt
+cat > Low_opt/INCAR << EOF
+SYSTEM = Low_opt
+ISTART = 0
+ICHARG = 2
+ENCUT = 250
+NSW = 100
+IBRION = 2
+ISIF = 2
+EDIFF = 1.0E-4
+EDIFFG = -0.08
+PREC = Accurate
+IBRION = 3
+POTIM = 0.1
+LWAVE = .FALSE.
+EOF
+
+#Med_opt
+cat > Med_opt/INCAR << EOF
+SYSTEM = Med_opt
+ISTART = 0
+ICHARG = 2
+ENCUT = 520
+NSW = 100
+IBRION = 2
+ISIF = 2
+EDIFF = 5.0E-4
+EDIFFG = -0.05
+PREC = Accurate
+EOF
+
+#High_opt
+cat > High_opt/INCAR << EOF
+SYSTEM = High_opt
+ISTART = 1
+ICHARG = 1
+ENCUT = 520
+NSW = 100
+IBRION = 2
+ISIF = 2
+EDIFF = 1.0E-5
+EDIFFG = -0.01
+PREC = Accurate
+EOF
+
+#Band
+cat > Band/INCAR << EOF
+SYSTEM = Band
+ICHARG = 11
+LORBIT = 12
+ISMEAR = 0
+PREC = Accurate
+EOF
+
+#DOS
+cat > DOS/INCAR << EOF
+SYSTEM = DOS
+ISTART = 1
+ICHARG = 1
+NSW = 100
+IBRION = 2
+ISIF = 2
+EDIFF = 1.0E-6
+EDIFFG = -0.01
+PREC = Accurate
+NEDOS = 1000
+EOF
+
+#Band_soc
+cat > Band_soc/INCAR << EOF
+SYSTEM = Band
+ICHARG = 11
+LORBIT = 12
+LSORBIT = .TRUE.
+ISMEAR = 0
+PREC = Accurate
+EOF
+
+
+#DOS_soc
+cat > DOS_soc/INCAR << EOF
+SYSTEM = DOS_soc
+ISTART = 1
+ICHARG = 1
+ENCUT = 520
+NSW = 100
+IBRION = 2
+ISIF = 2
+EDIFF = 1.0E-6
+EDIFFG = -0.01
+PREC = Accurate
+LNONCOLLINEAR = .TRUE.
+NEDOS = 1000
+!NBANDS = set manually
+EOF
+
+
+#change to the Low_opt directory and run the job
+cd Low_opt
+echo "starting low_opt calculation" >> $log_file
+noncollinear
+
+if grep -q "reached required accuracy" OUTCAR; then
+	ln -s CONTCAR ../Med_opt/POSCAR
+	ln -s CHGCAR ../Med_opt
+	cd ../Med_opt
+	echo "Starting med_opt calculation" >> $log_file
+	noncollinear
+else
+	echo "Low_opt did not converge" >> $log_file
+fi
+
+if grep -q "reached required accuracy" OUTCAR; then
+	cp CONTCAR ../High_opt/POSCAR
+	ln -s WAVECAR ../High_opt
+	ln -s CHGCAR ../High_opt
+	cd ../High_opt
+	export High_opt_outcar=$PWD/OUTCAR
+	echo "Starting high_opt calculation" >> $log_file
+	noncollinear
+else
+	echo "Med_opt did not converge" >> $log_file
+fi
+
+if grep -q "reached required accuracy" OUTCAR; then
+	#update the INCAR to include High_opt NBANDS 
+	nbands=$( grep NBANDS $High_opt_outcar | awk -F " " '{print $NF}')
+	ngx=$( grep NGX $High_opt_outcar | head -n 1 | awk -F " " '{print $5}')
+	ngy=$( grep NGY $High_opt_outcar | head -n 1 | awk -F " " '{print $8}')
+	ngz=$( grep NGZ $High_opt_outcar | head -n 1 | awk -F " " '{print $11}')
+	ln -s CONTCAR ../Band/POSCAR
+	ln -s WAVECAR ../Band
+	ln -s CHGCAR ../Band
+	ln -s $kpath ../Band/KPOINTS ; echo "copied KPATH to band directory" >> $log_file 
+	cd ../Band
+	echo "NBANDS = $nbands" >> INCAR 
+	echo "NGX = $ngx" >> INCAR
+	echo "NGY = $ngy" >> INCAR
+	echo "NGZ = $ngz" >> INCAR
+	echo "Starting band structure calculation" >> $log_file
+	noncollinear
+else
+	band_failed=True
+	echo "High_opt did not converge" >> $log_file
+fi
+
+cd ../ 
+ln -s Band/INCAR Band_soc
+ln -s Band/PROCAR Band_soc
+ln -s Band/KPOINTS Band_soc
+ln -s Band/CHGCAR Band_soc
+ln -s High_opt/CONTCAR Band_soc/POSCAR
+cd Band_soc
+echo "LSORBIT = .TRUE." >> INCAR
+noncollinear
+
+
+
+
