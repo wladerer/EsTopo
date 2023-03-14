@@ -157,8 +157,8 @@ echo "starting low_opt calculation" >> $log_file
 noncollinear
 
 if grep -q "reached required accuracy" OUTCAR; then
-	ln -s CONTCAR ../Med_opt/POSCAR
-	ln -s CHGCAR ../Med_opt
+	ln -s $PWD/CONTCAR ../Med_opt/POSCAR
+	ln -s $PWD/CHGCAR ../Med_opt
 	cd ../Med_opt
 	echo "Starting med_opt calculation" >> $log_file
 	noncollinear
@@ -168,8 +168,8 @@ fi
 
 if grep -q "reached required accuracy" OUTCAR; then
 	cp CONTCAR ../High_opt/POSCAR
-	ln -s WAVECAR ../High_opt
-	ln -s CHGCAR ../High_opt
+	ln -s $PWD/WAVECAR ../High_opt
+	ln -s $PWD/CHGCAR ../High_opt
 	cd ../High_opt
 	export High_opt_outcar=$PWD/OUTCAR
 	echo "Starting high_opt calculation" >> $log_file
@@ -184,10 +184,10 @@ if grep -q "reached required accuracy" OUTCAR; then
 	ngx=$( grep NGX $High_opt_outcar | head -n 1 | awk -F " " '{print $5}')
 	ngy=$( grep NGY $High_opt_outcar | head -n 1 | awk -F " " '{print $8}')
 	ngz=$( grep NGZ $High_opt_outcar | head -n 1 | awk -F " " '{print $11}')
-	ln -s CONTCAR ../Band/POSCAR
-	ln -s WAVECAR ../Band
-	ln -s CHGCAR ../Band
-	ln -s $kpath ../Band/KPOINTS ; echo "copied KPATH to band directory" >> $log_file 
+	ln -s $PWD/CONTCAR ../Band/POSCAR
+	ln -s $PWD/WAVECAR ../Band
+	ln -s $PWD/CHGCAR ../Band
+	ln -s $PWD/$kpath ../Band/KPOINTS ; echo "copied KPATH to band directory" >> $log_file 
 	cd ../Band
 	echo "NBANDS = $nbands" >> INCAR 
 	echo "NGX = $ngx" >> INCAR
@@ -201,11 +201,11 @@ else
 fi
 
 cd ../ 
-ln -s Band/INCAR Band_soc
-ln -s Band/PROCAR Band_soc
-ln -s Band/KPOINTS Band_soc
-ln -s Band/CHGCAR Band_soc
-ln -s High_opt/CONTCAR Band_soc/POSCAR
+ln -s $PWD/Band/INCAR Band_soc
+ln -s $PWD/Band/PROCAR Band_soc
+ln -s $PWD/Band/KPOINTS Band_soc
+ln -s $PWD/Band/CHGCAR Band_soc
+ln -s $PWD/High_opt/CONTCAR Band_soc/POSCAR
 cd Band_soc
 echo "LSORBIT = .TRUE." >> INCAR
 noncollinear
